@@ -36,7 +36,7 @@ namespace eval weather {
     http::register https 443 tls::socket
 
     setudef flag weather-apixu
-    # Default units for script
+    # Default units for weather output
     variable unit "imperial"
     # Set your apikey here
     variable apikey "<insert-your-key-here>"
@@ -49,12 +49,11 @@ namespace eval weather {
     bind pub - .wz weather::current_weather
     bind pub - .wzf weather::forecast
 
-
     proc current_weather {nick uhost hand chan text} {
         set text [string trim $text]
 
         if {$text eq "--help" || $text eq "-h"} {
-            weather::_get_help
+            _get_help $nick
             return
         }
 
@@ -76,7 +75,7 @@ namespace eval weather {
         set text [string trim $text]
 
         if {$text eq "--help" || $text eq "-h"} {
-            weather::_get_help
+            _get_help $nick
             return
         }
     }
@@ -85,7 +84,7 @@ namespace eval weather {
         set text [string trim $text]
 
         if {$text eq "--help" || $text eq "-h"} {
-            weather::_get_help
+            _get_help $nick
             return
         }
     }
@@ -99,7 +98,7 @@ namespace eval weather {
         if {[string length [dict get $userinfo location]] eq 0} {
             putlog "weather::_getusuerinfo did not find info set for $nick"            
             if {$::weather::private ne 0} {
-                puthelp "NOTICE $nick :Did you want the weather for a specific location? \
+                puthelp "NOTICE $nick :Did you want the weather for a specific location?\
                         Or please PM me with the \".set\" command to set a default location."
             } else {
                 puthelp "PRIVMSG $chan :No location set or use \".wz <location>\""
@@ -114,7 +113,15 @@ namespace eval weather {
         
     }
 
-    proc _get_help {} {
-
+proc _get_help {nick} {
+        putlog "weather::_get_help called"
+        puthelp "PRIVMSG $nick :Commands:"
+        puthelp "PRIVMSG $nick :.wz <location> - Show current weather. <location> is\
+                optional depending if you have your weather set to bot."
+        puthelp "PRIVMSG $nick :.wzf <location> - Show a 5 day forecast. <location> is\
+                 optional."
+        puthelp "PRIVMSG $nick :.set 0-2 <location> - Set a default location. Units\
+                must be specified from 0-2 where 0 = metric, 1 = imperial and 2 = both.\
+                i.e. \".set 2 New Orleans, LA\" would spam both unit types for New Orleans."
     }
 }
