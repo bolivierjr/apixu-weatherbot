@@ -40,8 +40,8 @@ namespace eval weather {
     http::register https 443 tls::socket
 
     setudef flag weather-apixu
-    # Default units for weather output
-    variable unit "imperial"
+    # Default units for weather output. 0 for metric, 1 for imperial, 2 for both.
+    variable units "1"
     # Set your apikey here
     variable apikey "<insert-your-key-here>"
     # Set to 1 (true by default) if you want all help info and set weather responses
@@ -91,7 +91,7 @@ namespace eval weather {
         if {$text eq "--help" || $text eq "-h"} {
             _get_help $nick
             return
-        } elseif {$::weather::private ne 0} {
+        } elseif {$::weather::private} {
             putlog "$::weather::private set to private. Use PM instead."
             puthelp "NOTICE $nick :Please private message me to set your location.\ 
                     i.e. \002'.set 1 <location>'\002 to set your location and use imperial\
@@ -146,7 +146,7 @@ namespace eval weather {
 
         if {[string length [dict get $userinfo location]] eq 0} {
             putlog "weather::_getusuerinfo did not find info set for $nick"            
-            if {$::weather::private ne 0} {
+            if {$::weather::private} {
                 puthelp "NOTICE $nick :Did you want the weather for a specific location?\
                         Or please PM me with the \".set\" command to set a default location."
             } else {
