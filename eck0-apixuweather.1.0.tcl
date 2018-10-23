@@ -1,3 +1,5 @@
+#!usr/bin/env tclsh
+
 ########################################################################################
 # Name              eck0-apixuweather1.0.tcl
 #
@@ -9,13 +11,15 @@
 #                       example: .chanset #chan +weather-apixu
 #
 #                   Commands:
-#                       !wl  
-#                           can be 0 for Metric, 1 for Imperial
-#                       !w 
-#                           Grabs current weather in location. If no location is suuplied will
-#                           try to use users saved location
-#                       !wf 
-#                           Same as !w but provides a 3 day forecast
+#                       .set 0-2 <location>
+#                          - can be 0 for Metric, 1 for Imperial, 2 for both.
+#                            i.e. ".set 2 New Orleans, LA"
+#                       .wz <location>
+#                          - Grabs current weather in location. If no location is given,
+#                            will try to use users saved location
+#                       .wzf <location>
+#                          - Same as .wz but provides a 5 day forecast
+#                       
 #                       Use the --help or -h flags with any of the commands to
 #                       get help with the commands and descriptions.
 #
@@ -44,10 +48,9 @@ namespace eval weather {
     # to use PM and notify. Set to 0 if you want it all in the channel.
     variable private 0
 
-    bind pub - .set weather::set_location
-    bind msg - .set weather::set_location
     bind pub - .wz weather::current_weather
     bind pub - .wzf weather::forecast
+    bind pub - .set weather::set_location
 
     proc current_weather {nick uhost hand chan text} {
         set text [string trim $text]
@@ -64,7 +67,7 @@ namespace eval weather {
             if {$userinfo eq -1} {
                 return
             } else {
-                puthelp "PRIVMSG $chan :Userinfo is [string [dict get $userinfo location]]"
+                puthelp "PRIVMSG $chan :Userinfo is [dict get $userinfo location]"
             }
         }
 
@@ -81,14 +84,60 @@ namespace eval weather {
     }
 
     proc set_location {nick uhost hand chan text} {
+        putlog "weather::set_location was called"
+        putlog "nick: $nick, uhost: $uhost, hand: $hand is trying to set location"
         set text [string trim $text]
 
         if {$text eq "--help" || $text eq "-h"} {
             _get_help $nick
             return
+        } elseif {$::weather::private ne 0} {
+            putlog "$::weather::private set to private. Use PM instead."
+            puthelp "NOTICE $nick :Please private message me to set your location.\ 
+                    i.e. \002'.set 1 <location>'\002 to set your location and use imperial\
+                    units."
+            return
         }
+
+        set units [string index $text 0]
+        set location [string range $text 2 end]
+
+        if {!($units eq "0" || $units eq "1" || $units eq "2")} {
+            putlog "$nick set units to an invalid number."
+            puthelp "NOTICE $nick :Units must be specified from 0-2 where 0 = metric,\
+                    1 = imperial and 2 = both. i.e. \002'.set 2 New Orleans, LA'\002 would\
+                    spam both unit types for New Orleans."
+            return
+        } elseif {![string length $location] > 0} {
+            putlog "$nick gave an invalid location"
+            puthelp "NOTICE $nick :Must supply a location to be set. i.e. \002'set 1\
+                    New Orleans, LA'\002"
+            return
+        } elseif {![validuser $hand]} {
+            adduser $nick
+            setuser $nick HOSTS [maskhost [getchanhost $nick] 
+            chattr $nick -hp
+            putlog "weather::set_location added user: $nick with host: $mask"
+        }
+
+        setuser $hand XTRA weather.location $location
+        setuser $hand XTRA weather.units $units
+
+        if {$units eq "0"} {
+            set units "metric"
+        } elseif {$units eq "1"} {
+            set units "imperial"
+        } elseif {$units eq "2"} {
+            set units "metric & imperial"
+        }
+
+        puthelp "PRIVMSG $chan :Default weather location for \002$nick\002 set to\
+                \002$location\002 and units set to \002$units\002\."
+        putlog  "$nick set their default location to $location."
+
     }
 
+    # Helper functions below
     proc _get_userinfo {nick hand chan} {
         putlog "weather::_getuserinfo looking up user location and units"
         set location [getuser $hand XTRA weather.location]
@@ -101,7 +150,7 @@ namespace eval weather {
                 puthelp "NOTICE $nick :Did you want the weather for a specific location?\
                         Or please PM me with the \".set\" command to set a default location."
             } else {
-                puthelp "PRIVMSG $chan :No location set or use \".wz <location>\""
+                puthelp "PRIVMSG $chan :No location set or use \002'.wz <location>'\002"
             }
             return -1
         }
@@ -113,7 +162,7 @@ namespace eval weather {
         
     }
 
-proc _get_help {nick} {
+    proc _get_help {nick} {
         putlog "weather::_get_help called"
         puthelp "PRIVMSG $nick :Commands:"
         puthelp "PRIVMSG $nick :.wz <location> - Show current weather. <location> is\
