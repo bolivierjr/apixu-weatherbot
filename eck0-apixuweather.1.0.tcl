@@ -50,7 +50,7 @@ namespace eval weather {
 
     bind pub - .wz weather::current_weather
     bind pub - .wzf weather::forecast
-    bind pub - .set weather::set_location
+    bind pub - .set weather::location
 
     proc current_weather {nick uhost hand chan text} {
         set text [string trim $text]
@@ -83,11 +83,7 @@ namespace eval weather {
         }
     }
 
-    proc set_location {nick uhost hand chan text} {
-        putlog "weather::set_location was called"
-        putlog "nick: $nick, uhost: $uhost, hand: $hand is trying to set location"
-        set text [string trim $text]
-
+    proc location {nick uhost hand chan text} {
         if {$text eq "--help" || $text eq "-h"} {
             _get_help $nick
             return
@@ -99,42 +95,15 @@ namespace eval weather {
             return
         }
 
-        set units [string index $text 0]
-        set location [string range $text 2 end]
+        set location_info [_set_location $nick $uhost $hand $text]
 
-        if {!($units eq "0" || $units eq "1" || $units eq "2")} {
-            putlog "$nick set units to an invalid number."
-            puthelp "NOTICE $nick :Units must be specified from 0-2 where 0 = metric,\
-                    1 = imperial and 2 = both. i.e. \002'.set 2 New Orleans, LA'\002 would\
-                    spam both unit types for New Orleans."
+        if {$location_info eq -1} {
             return
-        } elseif {![string length $location] > 0} {
-            putlog "$nick gave an invalid location"
-            puthelp "NOTICE $nick :Must supply a location to be set. i.e. \002'set 1\
-                    New Orleans, LA'\002"
-            return
-        } elseif {![validuser $hand]} {
-            adduser $nick
-            setuser $nick HOSTS [maskhost [getchanhost $nick] 
-            chattr $nick -hp
-            putlog "weather::set_location added user: $nick with host: $mask"
-        }
-
-        setuser $hand XTRA weather.location $location
-        setuser $hand XTRA weather.units $units
-
-        if {$units eq "0"} {
-            set units "metric"
-        } elseif {$units eq "1"} {
-            set units "imperial"
-        } elseif {$units eq "2"} {
-            set units "metric & imperial"
         }
 
         puthelp "PRIVMSG $chan :Default weather location for \002$nick\002 set to\
-                \002$location\002 and units set to \002$units\002\."
-        putlog  "$nick set their default location to $location."
-
+                \002[dict get $location_info location]\002 and units set to\
+                \002[dict get $location_info units]\002\."
     }
 
     # Helper functions below
@@ -160,6 +129,48 @@ namespace eval weather {
 
     proc _get_xml {location type} {
         
+    }
+
+    proc _set_location {nick uhost hand text} {
+        putlog "weather::location was called"
+        putlog "nick: $nick, uhost: $uhost, hand: $hand is trying to set location"
+        set text [string trim $text]
+        set units [string index $text 0]
+        set location [string range $text 2 end]
+
+        if {!($units eq "0" || $units eq "1" || $units eq "2")} {
+            putlog "$nick set units to an invalid number."
+            puthelp "NOTICE $nick :Units must be specified from 0-2 where 0 = metric,\
+                    1 = imperial and 2 = both. i.e. \002'.set 2 New Orleans, LA'\002 would\
+                    spam both unit types for New Orleans."
+            return -1
+        } elseif {![string length $location] > 0} {
+            putlog "$nick gave an invalid location"
+            puthelp "NOTICE $nick :Must supply a location to be set. i.e. \002'set 1\
+                    New Orleans, LA'\002"
+            return -1
+        } elseif {![validuser $hand]} {
+            adduser $nick
+            setuser $nick HOSTS [maskhost [getchanhost $nick] 
+            chattr $nick -hp
+            putlog "weather::set_location added user: $nick with host: $mask"
+        }
+
+        setuser $hand XTRA weather.location $location
+        setuser $hand XTRA weather.units $units
+
+        if {$units eq "0"} {
+            set units "metric"
+        } elseif {$units eq "1"} {
+            set units "imperial"
+        } elseif {$units eq "2"} {
+            set units "metric & imperial"
+        }
+
+        putlog  "$nick set their default location to $location."
+
+        set location_info [dict create location $location units $units]
+        return $location_info    
     }
 
     proc _get_help {nick} {
