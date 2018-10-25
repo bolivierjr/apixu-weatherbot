@@ -1,11 +1,11 @@
 #!usr/bin/env tclsh
 
 ########################################################################################
-# Name              eck0-apixuweather1.0.tcl
+# Name              apixu-weatherbot-1.0.tcl
 #
-# Author            eck0
+# Author            Bruce Olivier <bolivierjr@gmail.com>
 #
-# Description       Uses the Apixu weatherAPI to grab the data.
+# Description       Uses the Apixu weather API to grab the data.
 #
 #                   Requires channel to be flagged with +weather-apixu
 #                       example: .chanset #chan +weather-apixu
@@ -42,17 +42,23 @@ namespace eval weather {
     setudef flag weather-apixu
     # Default units for weather output. 0 for metric, 1 for imperial, 2 for both.
     variable units "1"
+    variable base_url "https://api.apixu.com/v1"
     # Set your apikey here
     variable apikey "<insert-your-key-here>"
     # Set to 1 (true by default) if you want all help info and set weather responses
     # to use PM and notify. Set to 0 if you want it all in the channel.
-    variable private 0
+    variable private 1
 
-    bind pub - .wz weather::current_weather
+    # Public channel command bindings
+    bind pub - .wz weather::current
     bind pub - .wzf weather::forecast
     bind pub - .set weather::location
 
-    proc current_weather {nick uhost hand chan text} {
+    # Private message command bindings
+    bind msg - .set weather::pm_location
+
+    # Public command functions
+    proc current {nick uhost hand chan text} {
         set text [string trim $text]
 
         if {$text eq "--help" || $text eq "-h"} {
@@ -62,14 +68,15 @@ namespace eval weather {
 
         if {$text eq ""} {
             # Checks to see if a user has a location set
-            set userinfo [_get_userinfo $nick $hand $chan]
+            set userinfo [_get_userinfo $nick $hand]
 
             if {$userinfo eq -1} {
+                puthelp "PRIVMSG $chan :No location set or use \002'.wz <location>'\002"
                 return
-            } else {
-                puthelp "PRIVMSG $chan :Userinfo is [dict get $userinfo location]"
             }
         }
+
+        puthelp "PRIVMSG $chan :Userinfo is [dict get $userinfo location]"
 
         
     }
@@ -81,9 +88,21 @@ namespace eval weather {
             _get_help $nick
             return
         }
+
+        if {$text eq ""} {
+            # Checks to see if a user has a location set
+            set userinfo [_get_userinfo $nick $hand]
+
+            if {$userinfo eq -1} {
+                puthelp "PRIVMSG $chan :No location set or use \002'.wzf <location>'\002"
+                return
+            }
+        }
     }
 
     proc location {nick uhost hand chan text} {
+        set $text [string trim $text]
+
         if {$text eq "--help" || $text eq "-h"} {
             _get_help $nick
             return
@@ -106,8 +125,28 @@ namespace eval weather {
                 \002[dict get $location_info units]\002\."
     }
 
+    # Private message command functions
+    proc pm_location {nick uhost hand text} {
+        set text [string trim $text]
+
+        if {$text eq "--help" || $text eq "-h"} {
+            _get_help $nick
+            return
+        }
+
+        set location_info [_set_location $nick $uhost $hand $text]
+
+        if {$location_info eq -1} {
+            return
+        }
+
+        puthelp "PRIVMSG $nick :Default weather location for \002$nick\002 set to\
+                \002[dict get $location_info location]\002 and units set to\
+                \002[dict get $location_info units]\002\."
+    }
+
     # Helper functions below
-    proc _get_userinfo {nick hand chan} {
+    proc _get_userinfo {nick hand} {
         putlog "weather::_getuserinfo looking up user location and units"
         set location [getuser $hand XTRA weather.location]
         set units [getuser $hand XTRA weather.units]
@@ -118,8 +157,6 @@ namespace eval weather {
             if {$::weather::private} {
                 puthelp "NOTICE $nick :Did you want the weather for a specific location?\
                         Or please PM me with the \".set\" command to set a default location."
-            } else {
-                puthelp "PRIVMSG $chan :No location set or use \002'.wz <location>'\002"
             }
             return -1
         }
@@ -128,13 +165,35 @@ namespace eval weather {
     }
 
     proc _get_xml {location type} {
-        
+        regsub -all -- { } $location {%20} location
+
+        set url "$::weather::base_url/$type.json?key=$::weather::apikey&q=$location"
+        if {$type ne "current"} {
+            set url "$::weather::base_url/$type.json?key=$::weather::apikey\&q=$location&days=5"
+        }
+
+        putlog "weather::_get_xml getting data from $url"
+        set token [::http::geturl $url -timeout 10000]
+        ::http::wait $token
+        set data [::http::data $token]
+
+        if {[::http::status $token] eq "ok"} {
+            ::http::cleanup $token
+            putlog "HTTP status is ok"
+            return $data
+        }
+
+        if {![string length $data] > 0} {
+            error "apixu returned no data for some reason."
+        }
+
+        error [::http::error $token]
+        ::http::cleanup $token
     }
 
     proc _set_location {nick uhost hand text} {
         putlog "weather::location was called"
         putlog "nick: $nick, uhost: $uhost, hand: $hand is trying to set location"
-        set text [string trim $text]
         set units [string index $text 0]
         set location [string range $text 2 end]
 
