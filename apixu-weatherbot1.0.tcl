@@ -66,19 +66,36 @@ namespace eval weather {
             return
         }
 
-        if {$text eq ""} {
-            # Checks to see if a user has a location set
-            set userinfo [_get_userinfo $nick $hand]
-
-            if {$userinfo eq -1} {
-                puthelp "PRIVMSG $chan :No location set or use \002'.wz <location>'\002"
+        # Checks to see if a user has a location set
+        set userinfo [_get_userinfo $nick $hand]
+        if {$text eq "" && $userinfo eq -1} {
+            if {$::weather::private} {
+                puthelp "NOTICE $nick :Did you want the weather for a specific location?\
+                         Or please PM me with the \".set\" command to set a default location."
                 return
             }
+
+            puthelp "PRIVMSG $chan :No location set or use \002'.wz <location>'\002"
+            return
+        } elseif {$userinfo eq -1} {
+            set userinfo [dict create location $text units $::weather::units]
+        } elseif {$text ne ""} {
+            set userinfo [dict create location $text units [dict get $userinfo units]]
         }
 
-        puthelp "PRIVMSG $chan :Userinfo is [dict get $userinfo location]"
+        set location [dict get $userinfo location]
+        set xml_data [_get_xml $location "current"]
+        if {[catch {set xml_data [_get_xml $location "current"]} errormsg]} {
+            puthelp "PRVIMSG $chan :$errormsg"
+            return
+        }
 
-        
+        if {[catch {set current_weather [_xml_parse $xml_data $userinfo "current"]} errormsg]} {
+            puthelp "PRIVMSG $chan :$errormsg"
+            return
+        }
+
+        puthelp "PRIVMSG $chan :$current_weather"
     }
 
     proc forecast {nick uhost hand chan text} {
@@ -89,15 +106,36 @@ namespace eval weather {
             return
         }
 
-        if {$text eq ""} {
-            # Checks to see if a user has a location set
-            set userinfo [_get_userinfo $nick $hand]
 
-            if {$userinfo eq -1} {
-                puthelp "PRIVMSG $chan :No location set or use \002'.wzf <location>'\002"
+        # Checks to see if a user has a location set
+        set userinfo [_get_userinfo $nick $hand]
+        if {$text eq "" && $userinfo eq -1} {
+            if {$::weather::private} {
+                puthelp "NOTICE $nick :Did you want the weather for a specific location?\
+                         Or please PM me with the \".set\" command to set a default location."
                 return
             }
+
+            puthelp "PRIVMSG $chan :No location set or use \002'.wzf <location>'\002"
+            return
+        } elseif {$userinfo eq -1} {
+            set userinfo [dict create location $text units $::weather::units]
+        } elseif {$text ne ""} {
+            set userinfo [dict create location $text units [dict get $userinfo units]]
         }
+
+        set location [dict get $userinfo location]
+        if {[catch {set xml_data [_get_xml $location "forecast"]} errormsg]} {
+            puthelp "PRVIMSG $chan :$errormsg"
+            return
+        }
+
+        if {[catch {set forecastdays [_xml_parse $xml_data $userinfo "forecast"]} errormsg]} {
+            puthelp "PRIVMSG $chan :$errormsg"
+            return
+        }
+
+        puthelp "PRIVMSG $chan :$forecastdays"
     }
 
     proc location {nick uhost hand chan text} {
@@ -109,8 +147,8 @@ namespace eval weather {
         } elseif {$::weather::private} {
             putlog "$::weather::private set to private. Use PM instead."
             puthelp "NOTICE $nick :Please private message me to set your location.\ 
-                    i.e. \002'.set 1 <location>'\002 to set your location and use imperial\
-                    units."
+                     i.e. \002'.set 1 <location>'\002 to set your location and use imperial\
+                     units."
             return
         }
 
@@ -121,8 +159,8 @@ namespace eval weather {
         }
 
         puthelp "PRIVMSG $chan :Default weather location for \002$nick\002 set to\
-                \002[dict get $location_info location]\002 and units set to\
-                \002[dict get $location_info units]\002\."
+                 \002[dict get $location_info location]\002 and units set to\
+                 \002[dict get $location_info units]\002\."
     }
 
     # Private message command functions
@@ -141,8 +179,8 @@ namespace eval weather {
         }
 
         puthelp "PRIVMSG $nick :Default weather location for \002$nick\002 set to\
-                \002[dict get $location_info location]\002 and units set to\
-                \002[dict get $location_info units]\002\."
+                 \002[dict get $location_info location]\002 and units set to\
+                 \002[dict get $location_info units]\002\."
     }
 
     # Helper functions below
@@ -152,12 +190,8 @@ namespace eval weather {
         set units [getuser $hand XTRA weather.units]
         set userinfo [dict create location $location units $units]
 
-        if {[string length [dict get $userinfo location]] eq 0} {
+        if {![string length [dict get $userinfo location]]} {
             putlog "weather::_getusuerinfo did not find info set for $nick"            
-            if {$::weather::private} {
-                puthelp "NOTICE $nick :Did you want the weather for a specific location?\
-                        Or please PM me with the \".set\" command to set a default location."
-            }
             return -1
         }
  
@@ -167,28 +201,125 @@ namespace eval weather {
     proc _get_xml {location type} {
         regsub -all -- { } $location {%20} location
 
-        set url "$::weather::base_url/$type.json?key=$::weather::apikey&q=$location"
+        set url "$::weather::base_url/$type.xml?key=$::weather::apikey&q=$location"
         if {$type ne "current"} {
-            set url "$::weather::base_url/$type.json?key=$::weather::apikey\&q=$location&days=5"
+            set url "$::weather::base_url/$type.xml?key=$::weather::apikey&q=$location&days=5"
         }
 
         putlog "weather::_get_xml getting data from $url"
         set token [::http::geturl $url -timeout 10000]
-        ::http::wait $token
         set data [::http::data $token]
+        set status [::http::status $token]
+        set ncode [::http::ncode $token]
 
-        if {[::http::status $token] eq "ok"} {
+        if {$status eq "ok" || $ncode eq 200} {
             ::http::cleanup $token
-            putlog "HTTP status is ok"
+            putlog "status: $status, code: $ncode"
             return $data
         }
 
         if {![string length $data] > 0} {
+            ::http::cleanup $token
             error "apixu returned no data for some reason."
         }
+    }
 
-        error [::http::error $token]
-        ::http::cleanup $token
+    proc _xml_parse {xml userinfo type} {
+        set doc [dom parse $xml]
+        set root [$doc documentElement]
+
+        set errors [$root selectNodes /error]
+        if {[string length $errors]} {
+            foreach node {code message} {
+                set $node [[$root selectNodes /error/$node/text()] nodeValue]
+            }
+
+            putlog "weather::_xml_parse error code: $code, message: $message"
+            error $message
+        }
+
+        set units [dict get $userinfo units]
+        set city [[$root selectNodes /root/location/name/text()] nodeValue]
+        set region [[$root selectNodes /root/location/region/text()] nodeValue]
+
+        switch $type {
+            "current" {
+                set base "/root/current"
+
+                switch $units {
+                    "0" {
+                        foreach node {temp_c condition wind_kph wind_dir humidity feelslike_c} {
+                            if {$node eq "condition"} {
+                                set $node [[$root selectNodes $base/$node/text/text()] nodeValue]
+                                continue
+                            }
+
+                            set $node [[$root selectNodes $base/$node/text()] nodeValue]
+                        }
+
+                        return "\002$city, $region\002 - \002Conditions:\002 $condition - \002Temp:\
+                                \002$temp_c\C - \002Feelslike:\002 $feelslike_c\C - \002Humidity:\
+                                \002$humidity% - \002Wind:\002 [expr $wind_kph <= 8 ? \"Calm\" :\
+                                \"$wind_dir at $wind_kph\kph\"]"
+                    }
+
+                    "1" {
+                        foreach node {temp_f condition wind_mph wind_dir humidity feelslike_f} {
+                            if {$node eq "condition"} {
+                                set $node [[$root selectNodes $base/$node/text/text()] nodeValue]
+                                continue
+                            }
+
+                            set $node [[$root selectNodes $base/$node/text()] nodeValue]
+                        }
+
+                        return "\002$city, $region\002 - \002Conditions:\002 $condition - \002Temp:\
+                                \002$temp_f\F - \002Feelslike:\002 $feelslike_f\F - \002Humidity:\
+                                \002$humidity% - \002Wind:\002 [expr $wind_mph <= 5 ? \"Calm\" :\
+                                \"$wind_dir at $wind_mph\mph\"]"
+                    }
+
+                    "2" {
+                        foreach node {temp_f temp_c condition wind_mph wind_kph wind_dir humidity feelslike_f feelslike_c} {
+                            if {$node eq "condition"} {
+                                set $node [[$root selectNodes $base/$node/text/text()] nodeValue]
+                                continue
+                            }
+
+                            set $node [[$root selectNodes $base/$node/text()] nodeValue]
+                        }
+
+                        return "\002$city, $region\002 - \002Conditions:\002 $condition - \002Temp:\
+                                \002$temp_f\F ($temp_c\C) - \002Feelslike:\002 $feelslike_f\F\
+                                ($feelslike_c\C) - \002Humidity: \002$humidity% - \002Wind:\002\
+                                [expr $wind_mph <= 5 ? \"Calm\" : \"$wind_dir at $wind_mph\mph\
+                                ($wind_kph\kph)\"]"
+                    }
+                }
+
+                break
+            }
+
+            "forecast" {
+                set base "/root/forecast/forecastday""
+
+                switch $units {
+                    "0" {
+
+                    }
+
+                    "1" {
+
+                    }
+
+                    "2" {
+
+                    }
+                }
+
+                break
+            }
+        }
     }
 
     proc _set_location {nick uhost hand text} {

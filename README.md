@@ -1,1 +1,1 @@
-# eck0-weatherapixu
+# apixu-weatherbot
