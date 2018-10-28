@@ -55,8 +55,9 @@ namespace eval weather {
     bind pub - .set weather::location
 
     # Private message command bindings
+    bind msg - .wz weather::pm_current
+    bind msg - .wzf weather::pm_forecast
     bind msg - .set weather::pm_location
-
     # Public command functions
     proc current {nick uhost hand chan text} {
         set text [string trim $text]
@@ -162,6 +163,22 @@ namespace eval weather {
     }
 
     # Private message command functions
+    proc pm_current {nick uhost hand text} {
+        set text [string trim $text]
+
+        if {$text eq "--help" || $text eq "-h"} {
+            _get_help $nick
+        }
+    }
+
+    proc pm_forecast {nick uhost hand text} {
+        set text [string trim $text]
+
+        if {$text eq "--help" || $text eq "-h"} {
+            _get_help $nick
+        }
+    }
+
     proc pm_location {nick uhost hand text} {
         set text [string trim $text]
 
