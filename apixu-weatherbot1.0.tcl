@@ -37,8 +37,7 @@ namespace eval weather {
     package require tls
 
     # To be able to query APIs that use https
-    tls::init -tls1 true -ssl2 false -ssl3 false
-    http::register https 443 tls::socket
+    http::register https 443 [list tls::socket -tls1 1 -ssl2 0 -ssl3 0]
 
     setudef flag weather-apixu
     # Default units for weather output. 0 for metric, 1 for imperial, 2 for both.
@@ -46,9 +45,9 @@ namespace eval weather {
     variable base_url "https://api.apixu.com/v1"
     # Set your apikey here
     variable apikey "<insert-your-key-here>"
-    # Set to 1 (true by default) if you want all help info and set weather responses
-    # to use PM and notify. Set to 0 if you want it all in the channel.
-    variable private 1
+    # Set to 1 (0 by default) if you want set weather responses
+    # to use PM/notify. Set to 0 if you want it all in the channel.
+    variable private 0
 
     # Public channel command bindings
     bind pub - .wz weather::current
@@ -126,7 +125,7 @@ namespace eval weather {
 
         set location [dict get $userinfo location]
         if {[catch {set json_data [_get_json $location "forecast"]} errormsg]} {
-            puthelp "PRVIMSG $chan :$errormsg"
+            puthelp "PRIVMSG $chan :$errormsg"
             return
         }
 
@@ -145,16 +144,15 @@ namespace eval weather {
             _get_help $nick
             return
         } elseif {$::weather::private} {
-            putlog "$::weather::private set to private. Use PM instead."
-            puthelp "NOTICE $nick :Please private message me to set your location.\ 
+            putlog "::weather::private set to private. Use PM instead."
+            puthelp "PRIVMSG $nick :Please private message me to set your location.\ 
                      i.e. \002'.set 1 <location>'\002 to set your location and use imperial\
                      units."
             return
         }
 
-        set location_info [_set_location $nick $uhost $hand $text]
-
-        if {$location_info eq -1} {
+        if {[catch {set location_info [_set_location $nick $uhost $hand $text]} errormsg]} {
+            puthelp "PRIVMSG $chan :$errormsg"
             return
         }
 
@@ -172,10 +170,9 @@ namespace eval weather {
             return
         }
 
-        set location_info [_set_location $nick $uhost $hand $text]
-
-        if {$location_info eq -1} {
-            return
+        if {[catch {set location_info [_set_location $nick $uhost $hand $text]} errormsg]} {
+            puthelp "PRIVMSG $nick :$errormsg"
+            return 
         }
 
         puthelp "PRIVMSG $nick :Default weather location for \002$nick\002 set to\
@@ -200,6 +197,11 @@ namespace eval weather {
 
     proc _get_json {location type} {
         putlog "weather::_get_json was called"
+
+        if {[regexp {[^\w., ]} $location]} {
+            error "No matching location found"
+        }
+
         regsub -all -- { } $location {%20} location
 
         set url "$::weather::base_url/$type.json?key=$::weather::apikey&q=$location"
@@ -223,7 +225,7 @@ namespace eval weather {
             return $data
         }
 
-        if {![string length $data] > 0} {
+        if {![string length $data]} {
             ::http::cleanup $token
             putlog "returned no data"
             error "Bot's broked. Tell eck0 to MAEK FEEKS!"
@@ -241,6 +243,9 @@ namespace eval weather {
         set units [dict get $userinfo units]
         set city [dict get $data location name]
         set region [dict get $data location region]
+        if {[string length $region]} {
+            set region [dict get $data location country]
+        }
 
         switch $type {
             "current" {
@@ -316,20 +321,23 @@ namespace eval weather {
     proc _set_location {nick uhost hand text} {
         putlog "weather::location was called"
         putlog "nick: $nick, uhost: $uhost, hand: $hand is trying to set location"
+        if {[regexp {[^\w., ]} $text]} {
+            putlog "weather::_set_location caught illegal characters"
+            error "What are you doing? Act normal!"
+        }
+
         set units [string index $text 0]
         set location [string range $text 2 end]
 
         if {!($units eq "0" || $units eq "1" || $units eq "2")} {
             putlog "$nick set units to an invalid number."
-            puthelp "NOTICE $nick :Units must be specified from 0-2 where 0 = metric,\
-                    1 = imperial and 2 = both. i.e. \002'.set 2 New Orleans, LA'\002 would\
-                    spam both unit types for New Orleans."
-            return -1
-        } elseif {![string length $location] > 0} {
+            error "Units must be specified from 0-2 where 0 = metric, 1 = imperial and 2\
+                   = both. i.e. \002'.set 2 New Orleans, LA'\002 would spam both unit\
+                   types for New Orleans."
+        } elseif {![string length $location]} {
             putlog "$nick gave an invalid location"
-            puthelp "NOTICE $nick :Must supply a location to be set. i.e. \002'set 1\
+            error "Must supply a location to be set. i.e. \002'set 1\
                     New Orleans, LA'\002"
-            return -1
         } elseif {![validuser $hand]} {
             adduser $nick
             setuser $nick HOSTS [maskhost [getchanhost $nick] 
