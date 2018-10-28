@@ -31,6 +31,7 @@
 ########################################################################################
 
 namespace eval weather {
+    package require json
     package require tdom
     package require http
     package require tls
@@ -84,13 +85,12 @@ namespace eval weather {
         }
 
         set location [dict get $userinfo location]
-        set xml_data [_get_xml $location "current"]
-        if {[catch {set xml_data [_get_xml $location "current"]} errormsg]} {
-            puthelp "PRVIMSG $chan :$errormsg"
+        if {[catch {set json_data [_get_json $location "current"]} errormsg]} {
+            puthelp "PRIVMSG $chan :$errormsg"
             return
         }
 
-        if {[catch {set current_weather [_xml_parse $xml_data $userinfo "current"]} errormsg]} {
+        if {[catch {set current_weather [_json_parse $json_data $userinfo "current"]} errormsg]} {
             puthelp "PRIVMSG $chan :$errormsg"
             return
         }
@@ -125,12 +125,12 @@ namespace eval weather {
         }
 
         set location [dict get $userinfo location]
-        if {[catch {set xml_data [_get_xml $location "forecast"]} errormsg]} {
+        if {[catch {set json_data [_get_json $location "forecast"]} errormsg]} {
             puthelp "PRVIMSG $chan :$errormsg"
             return
         }
 
-        if {[catch {set forecastdays [_xml_parse $xml_data $userinfo "forecast"]} errormsg]} {
+        if {[catch {set forecastdays [_json_parse $json_data $userinfo "forecast"]} errormsg]} {
             puthelp "PRIVMSG $chan :$errormsg"
             return
         }
@@ -198,16 +198,21 @@ namespace eval weather {
        return $userinfo 
     }
 
-    proc _get_xml {location type} {
+    proc _get_json {location type} {
+        putlog "weather::_get_json was called"
         regsub -all -- { } $location {%20} location
 
-        set url "$::weather::base_url/$type.xml?key=$::weather::apikey&q=$location"
+        set url "$::weather::base_url/$type.json?key=$::weather::apikey&q=$location"
         if {$type ne "current"} {
-            set url "$::weather::base_url/$type.xml?key=$::weather::apikey&q=$location&days=5"
+            set url "$::weather::base_url/$type.json?key=$::weather::apikey&q=$location&days=5"
         }
 
-        putlog "weather::_get_xml getting data from $url"
-        set token [::http::geturl $url -timeout 10000]
+        putlog "weather::_get_json getting data from $url"
+        if {[catch {set token [::http::geturl $url -timeout 10000]} errormsg]} {
+            putlog "::http::geturl Error: $errormsg"
+            error "No matching location found"
+        }
+
         set data [::http::data $token]
         set status [::http::status $token]
         set ncode [::http::ncode $token]
@@ -220,43 +225,32 @@ namespace eval weather {
 
         if {![string length $data] > 0} {
             ::http::cleanup $token
-            error "apixu returned no data for some reason."
+            putlog "returned no data"
+            error "Bot's broked. Tell eck0 to MAEK FEEKS!"
         }
     }
 
-    proc _xml_parse {xml userinfo type} {
-        set doc [dom parse $xml]
-        set root [$doc documentElement]
+    proc _json_parse {json userinfo type} {
+        set data [::json::json2dict $json]
 
-        set errors [$root selectNodes /error]
-        if {[string length $errors]} {
-            foreach node {code message} {
-                set $node [[$root selectNodes /error/$node/text()] nodeValue]
-            }
-
-            putlog "weather::_xml_parse error code: $code, message: $message"
-            error $message
+        if {[dict exists $data error]} {
+            putlog [dict get $data error message]
+            error [dict get $data error message]
         }
 
         set units [dict get $userinfo units]
-        set city [[$root selectNodes /root/location/name/text()] nodeValue]
-        set region [[$root selectNodes /root/location/region/text()] nodeValue]
+        set city [dict get $data location name]
+        set region [dict get $data location region]
 
         switch $type {
             "current" {
-                set base "/root/current"
+                set condition [dict get $data current condition text]
+                foreach key {temp_f temp_c wind_mph wind_kph wind_dir humidity feelslike_f feelslike_c} {
+                    set $key [dict get $data current $key]
+                }
 
                 switch $units {
                     "0" {
-                        foreach node {temp_c condition wind_kph wind_dir humidity feelslike_c} {
-                            if {$node eq "condition"} {
-                                set $node [[$root selectNodes $base/$node/text/text()] nodeValue]
-                                continue
-                            }
-
-                            set $node [[$root selectNodes $base/$node/text()] nodeValue]
-                        }
-
                         return "\002$city, $region\002 - \002Conditions:\002 $condition - \002Temp:\
                                 \002$temp_c\C - \002Feelslike:\002 $feelslike_c\C - \002Humidity:\
                                 \002$humidity% - \002Wind:\002 [expr $wind_kph <= 8 ? \"Calm\" :\
@@ -264,15 +258,6 @@ namespace eval weather {
                     }
 
                     "1" {
-                        foreach node {temp_f condition wind_mph wind_dir humidity feelslike_f} {
-                            if {$node eq "condition"} {
-                                set $node [[$root selectNodes $base/$node/text/text()] nodeValue]
-                                continue
-                            }
-
-                            set $node [[$root selectNodes $base/$node/text()] nodeValue]
-                        }
-
                         return "\002$city, $region\002 - \002Conditions:\002 $condition - \002Temp:\
                                 \002$temp_f\F - \002Feelslike:\002 $feelslike_f\F - \002Humidity:\
                                 \002$humidity% - \002Wind:\002 [expr $wind_mph <= 5 ? \"Calm\" :\
@@ -280,15 +265,6 @@ namespace eval weather {
                     }
 
                     "2" {
-                        foreach node {temp_f temp_c condition wind_mph wind_kph wind_dir humidity feelslike_f feelslike_c} {
-                            if {$node eq "condition"} {
-                                set $node [[$root selectNodes $base/$node/text/text()] nodeValue]
-                                continue
-                            }
-
-                            set $node [[$root selectNodes $base/$node/text()] nodeValue]
-                        }
-
                         return "\002$city, $region\002 - \002Conditions:\002 $condition - \002Temp:\
                                 \002$temp_f\F ($temp_c\C) - \002Feelslike:\002 $feelslike_f\F\
                                 ($feelslike_c\C) - \002Humidity: \002$humidity% - \002Wind:\002\
@@ -296,28 +272,43 @@ namespace eval weather {
                                 ($wind_kph\kph)\"]"
                     }
                 }
-
-                break
             }
 
             "forecast" {
-                set base "/root/forecast/forecastday""
+                set forecasts [dict get $data forecast forecastday]
+                set spam "Forecast for \002$city, $region\002"
 
-                switch $units {
-                    "0" {
+                foreach forecast $forecasts {
+                    set date_epoch [dict get $forecast date_epoch]
+                    set dayname [clock format $date_epoch -format "%a"]
+                    set condition [dict get $forecast day condition text]
+                    set maxtemp_c [dict get $forecast day maxtemp_c]
+                    set mintemp_c [dict get $forecast day mintemp_c]
+                    set maxtemp_f [dict get $forecast day maxtemp_f]
+                    set mintemp_f [dict get $forecast day mintemp_f]
 
-                    }
+                    switch $units {
+                        "0" {
+                            append spam " - \002$dayname:\002 $condition (High: $maxtemp_c\C\
+                                         Low: $mintemp_c\C)"
+                            continue
+                        }
 
-                    "1" {
+                        "1" {
+                            append spam " - \002$dayname:\002 $condition (High: $maxtemp_f\F\
+                                         Low: $mintemp_f\F)"
+                            continue
+                        }
 
-                    }
-
-                    "2" {
-
+                        "2" {
+                            append spam " - \002$dayname:\002 $condition (High: $maxtemp_f\F/$maxtemp_c\C\
+                                         Low: $mintemp_f\F/$mintemp_c\C)"
+                            continue
+                        }
                     }
                 }
 
-                break
+                return $spam
             }
         }
     }
@@ -375,3 +366,5 @@ namespace eval weather {
                 i.e. \".set 2 New Orleans, LA\" would spam both unit types for New Orleans."
     }
 }
+
+putlog "apixu-weatherbot1.0.tcl (https://github.com/bolivierjr/apixu-weatherbot) loaded"
