@@ -15,8 +15,9 @@
 #                          - can be 0 for Metric, 1 for Imperial, 2 for both.
 #                            i.e. ".set 2 New Orleans, LA"
 #                       .wz <location>
-#                          - Grabs current weather in location. If no location is given,
-#                            will try to use users saved location
+#                          - Grabs current weather location. If no location is
+#                            given, will try to use users saved location
+#
 #                       .wzf <location>
 #                          - Same as .wz but provides a 5 day forecast
 #                       
@@ -25,8 +26,9 @@
 #
 # Version           1.0 - Initial Release
 #
-# Notes             Grab your own api key at https://apixu.com and place
-#                   it in the "apikey" variable below. 
+# Notes             Grab your own api key at https://apixu.com and place it in
+#                   the "apikey" variable below. Set private variable to 0 or 1
+#                   if you want the set command responses in PM.
 #
 ########################################################################################
 
@@ -58,7 +60,10 @@ namespace eval weather {
     bind msg - .wz weather::pm_current
     bind msg - .wzf weather::pm_forecast
     bind msg - .set weather::pm_location
+
+    ##########################
     # Public command functions
+    ##########################
     proc current {nick uhost hand chan text} {
         set text [string trim $text]
 
@@ -162,7 +167,9 @@ namespace eval weather {
                  \002[dict get $location_info units]\002\."
     }
 
+    ###################################
     # Private message command functions
+    ###################################
     proc pm_current {nick uhost hand text} {
         set text [string trim $text]
 
@@ -197,8 +204,18 @@ namespace eval weather {
                  \002[dict get $location_info units]\002\."
     }
 
-    # Helper functions below
+    #######################
+    # Helper functions
+    #######################
     proc _get_userinfo {nick hand} {
+        # Looks up userinfo in the XTRA of userfile.
+        #
+        # Args:
+        #   nick(string) - Users nick.
+        #   hand(string) - Users handle.
+        #
+        # Returns:
+        #   (dict/int) - Returns userinfo or -1 if user not found.
         putlog "weather::_getuserinfo looking up user location and units"
         set location [getuser $hand XTRA weather.location]
         set units [getuser $hand XTRA weather.units]
@@ -213,6 +230,14 @@ namespace eval weather {
     }
 
     proc _get_json {location type} {
+        # Fetches JSON data from the apixu API.
+        #
+        # Args:
+        #   location(string) - Users location given.
+        #   type(string) - Current weather or forecast called.
+        #
+        # Returns:
+        #   (string) Returns json data received from the api.
         putlog "weather::_get_json was called"
 
         if {[regexp {[^\w., ]} $location]} {
@@ -250,6 +275,15 @@ namespace eval weather {
     }
 
     proc _json_parse {json userinfo type} {
+        # Converts json to a dict and parses it to display weather.
+        #
+        # Args:
+        #   json(string) - Data received from api.
+        #   userinfo(dict) - Userinfo with location and units set.
+        #   type(string) - Current weather or forecast called.
+        #
+        # Returns:
+        #   (string) - Returns the string of weather to be displayed to user.
         set data [::json::json2dict $json]
 
         if {[dict exists $data error]} {
@@ -336,6 +370,16 @@ namespace eval weather {
     }
 
     proc _set_location {nick uhost hand text} {
+        # Sets a users location and units in the eggdrop userfile.
+        #
+        # Args:
+        #   nick(string) - Users nick.
+        #   ushost(string) - Users username and host.
+        #   hand(string) - Users handle.
+        #   text(string) - Units and location to be set.
+        #
+        # Returns:
+        #   (dict) - Returns the userinfo that was set to the bot.
         putlog "weather::location was called"
         putlog "nick: $nick, uhost: $uhost, hand: $hand is trying to set location"
         if {[regexp {[^\w., ]} $text]} {
@@ -380,6 +424,14 @@ namespace eval weather {
     }
 
     proc _get_help {nick} {
+        # Help section of the script called by user.
+        #
+        # Args:
+        #   nick(string) - Users nick.
+        #
+        # Returns:
+        #   (string) - Returns the list of commands and
+        #              description/examples of each one.
         putlog "weather::_get_help called"
         puthelp "PRIVMSG $nick :Commands:"
         puthelp "PRIVMSG $nick :.wz <location> - Show current weather. <location> is\
