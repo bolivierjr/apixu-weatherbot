@@ -260,7 +260,7 @@ namespace eval weather {
         set units [dict get $userinfo units]
         set city [dict get $data location name]
         set region [dict get $data location region]
-        if {[string length $region]} {
+        if {![string length $region]} {
             set region [dict get $data location country]
         }
 
