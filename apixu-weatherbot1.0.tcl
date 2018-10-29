@@ -150,6 +150,7 @@ namespace eval weather {
             _get_help $nick
             return
         } elseif {$::weather::private} {
+            # If $private is set to 1, send a PM
             putlog "::weather::private set to private. Use PM instead."
             puthelp "PRIVMSG $nick :Please private message me to set your location.\ 
                      i.e. \002'.set 1 <location>'\002 to set your location and use imperial\
@@ -244,6 +245,7 @@ namespace eval weather {
             error "No matching location found"
         }
 
+        # Replace all spaces in $location with %20 for theapi link call
         regsub -all -- { } $location {%20} location
 
         set url "$::weather::base_url/$type.json?key=$::weather::apikey&q=$location"
@@ -261,6 +263,7 @@ namespace eval weather {
         set status [::http::status $token]
         set ncode [::http::ncode $token]
 
+        # Return the json data
         if {$status eq "ok" || $ncode eq 200} {
             ::http::cleanup $token
             putlog "status: $status, code: $ncode"
@@ -294,10 +297,14 @@ namespace eval weather {
         set units [dict get $userinfo units]
         set city [dict get $data location name]
         set region [dict get $data location region]
+        # If the region key is not found, usue the country
         if {![string length $region]} {
             set region [dict get $data location country]
         }
 
+        # Check to see if querying current or forecast weather and nested
+        # switch to check whether units are 0, 1, or 2 for metric, imperial
+        # or both. Return given string of data to display to the user.
         switch $type {
             "current" {
                 set condition [dict get $data current condition text]
@@ -336,6 +343,7 @@ namespace eval weather {
 
                 foreach forecast $forecasts {
                     set date_epoch [dict get $forecast date_epoch]
+                    # Converts epoch time to the day of the week.
                     set dayname [clock format $date_epoch -format "%a"]
                     set condition [dict get $forecast day condition text]
                     set maxtemp_c [dict get $forecast day maxtemp_c]
@@ -406,6 +414,8 @@ namespace eval weather {
             putlog "weather::set_location added user: $nick with host: $mask"
         }
 
+        # Sets the location and units to each user
+        # in the eggdrop userfile.
         setuser $hand XTRA weather.location $location
         setuser $hand XTRA weather.units $units
 
