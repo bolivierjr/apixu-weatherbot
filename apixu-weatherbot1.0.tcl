@@ -217,6 +217,7 @@ namespace eval weather {
         #
         # Returns:
         #   (dict) - Returns userinfo or error if user not found.
+        #
         putlog "weather::_getuserinfo looking up user location and units"
         set location [getuser $hand XTRA weather.location]
         set units [getuser $hand XTRA weather.units]
@@ -239,6 +240,7 @@ namespace eval weather {
         #
         # Returns:
         #   (string) Returns json data received from the api.
+        #
         putlog "weather::_get_json was called"
 
         if {[regexp {[^\w., ]} $location]} {
@@ -287,6 +289,7 @@ namespace eval weather {
         #
         # Returns:
         #   (string) - Returns the string of weather to be displayed to user.
+        #
         set data [::json::json2dict $json]
 
         if {[dict exists $data error]} {
@@ -297,9 +300,17 @@ namespace eval weather {
         set units [dict get $userinfo units]
         set city [dict get $data location name]
         set region [dict get $data location region]
-        # If the region key is not found, usue the country
-        if {![string length $region]} {
-            set region [dict get $data location country]
+
+        # If the region is not found or every city not in USA/CA, use
+        # the country instead of region.
+        set ca "Canada"
+        set usa "United States of America"
+        set country [dict get $data location country]
+        if {$country eq "USA"} {
+            set country "United States of America"
+        }
+        if {![string length $region] || !($usa eq $country || $ca eq $country)} {
+            set region $country
         }
 
         # Check to see if querying current or forecast weather and nested
@@ -319,14 +330,12 @@ namespace eval weather {
                                 \002$humidity% - \002Wind:\002 [expr $wind_kph <= 8 ? \"Calm\" :\
                                 \"$wind_dir at $wind_kph\kph\"]"
                     }
-
                     "1" {
                         return "\002$city, $region\002 - \002Conditions:\002 $condition - \002Temp:\
                                 \002$temp_f\F - \002Feelslike:\002 $feelslike_f\F - \002Humidity:\
                                 \002$humidity% - \002Wind:\002 [expr $wind_mph <= 5 ? \"Calm\" :\
                                 \"$wind_dir at $wind_mph\mph\"]"
                     }
-
                     "2" {
                         return "\002$city, $region\002 - \002Conditions:\002 $condition - \002Temp:\
                                 \002$temp_f\F ($temp_c\C) - \002Feelslike:\002 $feelslike_f\F\
@@ -357,13 +366,11 @@ namespace eval weather {
                                          Low: $mintemp_c\C)"
                             continue
                         }
-
                         "1" {
                             append spam " - \002$dayname:\002 $condition (High: $maxtemp_f\F\
                                          Low: $mintemp_f\F)"
                             continue
                         }
-
                         "2" {
                             append spam " - \002$dayname:\002 $condition (High: $maxtemp_f\F/$maxtemp_c\C\
                                          Low: $mintemp_f\F/$mintemp_c\C)"
@@ -387,7 +394,9 @@ namespace eval weather {
         #   text(string) - Units and location to be set.
         #
         # Returns:
-        #   (dict) - Returns the userinfo that was set to the bot.
+        #   (dict) - Returns the userinfo(units and location)
+        #            that was set to the bot.
+        #
         putlog "weather::location was called"
         putlog "nick: $nick, uhost: $uhost, hand: $hand is trying to set location"
         if {[regexp {[^\w., ]} $text]} {
@@ -419,12 +428,16 @@ namespace eval weather {
         setuser $hand XTRA weather.location $location
         setuser $hand XTRA weather.units $units
 
-        if {$units eq "0"} {
-            set units "metric"
-        } elseif {$units eq "1"} {
-            set units "imperial"
-        } elseif {$units eq "2"} {
-            set units "metric & imperial"
+        switch $units {
+            "0" {
+                set units "metric"
+            }
+            "1" {
+                set units "imperial"
+            }
+            "2" {
+                set units "metric & imperial"
+            }
         }
 
         putlog  "$nick set their default location to $location."
@@ -442,6 +455,7 @@ namespace eval weather {
         # Returns:
         #   (string) - Returns the list of commands and
         #              description/examples of each one.
+        #
         putlog "weather::_get_help called"
         puthelp "PRIVMSG $nick :Commands:"
         puthelp "PRIVMSG $nick :.wz <location> - Show current weather. <location> is\
