@@ -1,7 +1,7 @@
 #!usr/bin/env tclsh
 
 ########################################################################################
-# Name              apixu-weatherbot-1.0.tcl
+# Name              apixu-weatherbot1.0.tcl
 #
 # Author            Bruce Olivier <bolivierjr@gmail.com>
 #
@@ -74,7 +74,7 @@ namespace eval weather {
 
         # Checks to see if a user has a location set
         set userinfo [_get_userinfo $nick $hand]
-        if {$text eq "" && $userinfo eq -1} {
+        if {$text eq "" && [dict exists $userinfo error]} {
             if {$::weather::private} {
                 puthelp "NOTICE $nick :Did you want the weather for a specific location?\
                          Or please PM me with the \".set\" command to set a default location."
@@ -83,7 +83,7 @@ namespace eval weather {
 
             puthelp "PRIVMSG $chan :No location set or use \002'.wz <location>'\002"
             return
-        } elseif {$userinfo eq -1} {
+        } elseif {[dict exists $userinfo error]} {
             set userinfo [dict create location $text units $::weather::units]
         } elseif {$text ne ""} {
             set userinfo [dict create location $text units [dict get $userinfo units]]
@@ -114,7 +114,7 @@ namespace eval weather {
 
         # Checks to see if a user has a location set
         set userinfo [_get_userinfo $nick $hand]
-        if {$text eq "" && $userinfo eq -1} {
+        if {$text eq "" && [dict exists $userinfo error]} {
             if {$::weather::private} {
                 puthelp "NOTICE $nick :Did you want the weather for a specific location?\
                          Or please PM me with the \".set\" command to set a default location."
@@ -123,7 +123,7 @@ namespace eval weather {
 
             puthelp "PRIVMSG $chan :No location set or use \002'.wzf <location>'\002"
             return
-        } elseif {$userinfo eq -1} {
+        } elseif {[dict exists $userinfo error]} {
             set userinfo [dict create location $text units $::weather::units]
         } elseif {$text ne ""} {
             set userinfo [dict create location $text units [dict get $userinfo units]]
@@ -215,7 +215,7 @@ namespace eval weather {
         #   hand(string) - Users handle.
         #
         # Returns:
-        #   (dict/int) - Returns userinfo or -1 if user not found.
+        #   (dict) - Returns userinfo or error if user not found.
         putlog "weather::_getuserinfo looking up user location and units"
         set location [getuser $hand XTRA weather.location]
         set units [getuser $hand XTRA weather.units]
@@ -223,7 +223,7 @@ namespace eval weather {
 
         if {![string length [dict get $userinfo location]]} {
             putlog "weather::_getusuerinfo did not find info set for $nick"            
-            return -1
+            return [dict create error "Did not find a user"]
         }
  
        return $userinfo 
