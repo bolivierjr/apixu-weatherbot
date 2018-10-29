@@ -152,7 +152,7 @@ namespace eval weather {
         } elseif {$::weather::private} {
             # If $private is set to 1, send a PM
             putlog "::weather::private set to private. Use PM instead."
-            puthelp "PRIVMSG $nick :Please private message me to set your location.\ 
+            puthelp "PRIVMSG $nick :Please private message me to set your location.\
                      i.e. \002'.set 1 <location>'\002 to set your location and use imperial\
                      units."
             return
@@ -342,9 +342,9 @@ namespace eval weather {
                 set spam "Forecast for \002$city, $region\002"
 
                 foreach forecast $forecasts {
-                    set date_epoch [dict get $forecast date_epoch]
-                    # Converts epoch time to the day of the week.
-                    set dayname [clock format $date_epoch -format "%a"]
+                    set date [dict get $forecast date]
+                    # Converts date to the day of the week.
+                    set dayname [clock format [clock scan $date] -format %a]
                     set condition [dict get $forecast day condition text]
                     set maxtemp_c [dict get $forecast day maxtemp_c]
                     set mintemp_c [dict get $forecast day mintemp_c]
