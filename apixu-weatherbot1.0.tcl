@@ -243,8 +243,22 @@ namespace eval weather {
         #
         putlog "weather::_get_json was called"
 
-        if {[regexp {[^\w., ]} $location]} {
-            error "No matching location found"
+        # First regexp matches any location given by user that is not
+        # a-z, A-Z, number, period, comma or space. This is sanitize
+        # the location string given to catch any illegal characters
+        # before the API call that will return an error.
+        #
+        # Second regexp matches any location give by user that starts
+        # and ends with a-z or A-Z with a : in the between the two. This
+        # is to let strings like "iata:ksjc" to be passed through as the
+        # only illegal character if used the correct way.
+        #
+        # If the first regexp is true and second regexp is false, the
+        # conditional will be true and throw an error for illegal characters.
+        if {[regexp {[^\w., ]} $location] && ![regexp {^[a-zA-Z]+:[a-zA-Z]+$} $location]} {
+            putlog "weather::_get_json caught illegal characters"
+            error "Illegal characters in your location query. Acceptable characters:\
+                   a-z, 0-9, commas, and spaces. Colons only used i.e. 'iata:ksjc'"
         }
 
         # Replace all spaces in $location with %20 for theapi link call
@@ -399,13 +413,26 @@ namespace eval weather {
         #
         putlog "weather::location was called"
         putlog "nick: $nick, uhost: $uhost, hand: $hand is trying to set location"
-        if {[regexp {[^\w., ]} $text]} {
-            putlog "weather::_set_location caught illegal characters"
-            error "What are you doing? Act normal!"
-        }
-
         set units [string index $text 0]
         set location [string range $text 2 end]
+
+        # First regexp matches any location given by user that is not
+        # a-z, A-Z, number, period, comma or space. This is sanitize
+        # the location string given to catch any illegal characters
+        # before the API call that will return an error.
+        #
+        # Second regexp matches any location give by user that starts
+        # and ends with a-z or A-Z with a : in the between the two. This
+        # is to let strings like "iata:ksjc" to be passed through as the
+        # only illegal character if used the correct way.
+        #
+        # If the first regexp is true and second regexp is false, the
+        # conditional will be true and throw an error for illegal characters.
+        if {[regexp {[^\w., ]} $location] && ![regexp {^[a-zA-Z]+:[a-zA-Z]+$} $location]} {
+            putlog "weather::_set_location caught illegal characters"
+            error "Illegal characters in your location query. Acceptable characters:\
+                   a-z, 0-9, commas, and spaces. Colons only used i.e. 'iata:ksjc'"
+        }
 
         if {!($units eq "0" || $units eq "1" || $units eq "2")} {
             putlog "$nick set units to an invalid number."
