@@ -45,8 +45,10 @@ namespace eval weather {
     # Default units for weather output. 0 for metric, 1 for imperial, 2 for both.
     variable units "1"
     variable base_url "https://api.apixu.com/v1"
-    # Set your apikey here
-    variable apikey "<insert-your-key-here>"
+    # Environment variable set for the weather api from apixu.
+    variable apikey $::env(WEATHER_API_KEY)
+    # Number of days you want the forecast to output.
+    variable forecast_days "5"
     # Set to 1 (0 by default) if you want set weather responses
     # to use PM/notify. Set to 0 if you want it all in the channel.
     variable private 0
@@ -90,7 +92,7 @@ namespace eval weather {
         }
 
         set location [dict get $userinfo location]
-        if {[catch {set json_data [_get_json $location "current"]} errormsg]} {
+        if {[catch {set json_data [_get_weather_data $location "current" $chan]} errormsg]} {
             puthelp "PRIVMSG $chan :$errormsg"
             return
         }
@@ -130,7 +132,7 @@ namespace eval weather {
         }
 
         set location [dict get $userinfo location]
-        if {[catch {set json_data [_get_json $location "forecast"]} errormsg]} {
+        if {[catch {set json_data [_get_weather_data $location "forecast" $chan]} errormsg]} {
             puthelp "PRIVMSG $chan :$errormsg"
             return
         }
@@ -231,7 +233,7 @@ namespace eval weather {
        return $userinfo 
     }
 
-    proc _get_json {location type} {
+    proc _get_weather_data {location type chan} {
         # Fetches JSON data from the apixu API.
         #
         # Args:
@@ -239,61 +241,78 @@ namespace eval weather {
         #   type(string) - Current weather or forecast called.
         #
         # Returns:
-        #   (string) Returns json data received from the api.
+        #   (dict) Returns json data received from the api and
+        #          converted to a dict.
         #
-        putlog "weather::_get_json was called"
-
-        # First regexp matches any location given by user that is not
-        # a-z, A-Z, number, period, comma or space. This is sanitize
-        # the location string given to catch any illegal characters
-        # before the API call that will return an error.
-        #
-        # Second regexp matches any location give by user that starts
-        # and ends with a-z or A-Z with a : in the between the two. This
-        # is to let strings like "iata:ksjc" to be passed through as the
-        # only illegal character if used the correct way.
-        #
-        # If the first regexp is true and second regexp is false, the
-        # conditional will be true and throw an error for illegal characters.
-        if {[regexp {[^\w., ]} $location] && ![regexp {^[a-zA-Z]+:[a-zA-Z]+$} $location]} {
-            putlog "weather::_get_json caught illegal characters"
-            error "Illegal characters in your location query. Acceptable characters:\
-                   a-z, 0-9, commas, and spaces. Colons only used i.e. 'iata:ksjc'"
-        }
-
-        # Replace all spaces in $location with %20 for theapi link call
-        regsub -all -- { } $location {%20} location
-
-        set url "$::weather::base_url/$type.json?key=$::weather::apikey&q=$location"
+        putlog "weather::_get_weather_datawas called"
+        set query [::http::formatQuery key $::weather::apikey q $location]
+        set url "$::weather::base_url/$type.json?$query"
         if {$type ne "current"} {
-            set url "$::weather::base_url/$type.json?key=$::weather::apikey&q=$location&days=5"
+            set url "$::weather::base_url/$type.json?$query&days=$::weather::forecast_days"
         }
 
-        putlog "weather::_get_json getting data from $url"
-        if {[catch {set token [::http::geturl $url -timeout 10000]} errormsg]} {
-            putlog "::http::geturl Error: $errormsg"
-            error "No matching location found"
-        }
-
-        set data [::http::data $token]
+        putlog "weather::_get_weather_data getting data from $url"
+        set token [::http::geturl $url -timeout 750]
         set status [::http::status $token]
-        set ncode [::http::ncode $token]
 
-        # Return the json data
-        if {$status eq "ok" || $ncode eq 200} {
+        # If a timeout occurs to the api request, retry up to
+        # max_retries with backoff. Default backoff set to 1000ms.
+        if {$status eq "timeout"} {
             ::http::cleanup $token
-            putlog "status: $status, code: $ncode"
-            return $data
+            set retry 1
+            set max_retries 10
+            set backoff 1000
+
+            while {$retry <= $max_retries} {
+                set token [::http::geturl $url -timeout 750]
+                set status [::http::status $token]
+
+                if {$retry eq 3} {
+                    putquick "PRIVMSG $chan :This is taking a bit, please wait."
+                }
+
+                if {$status eq "timeout"} {
+                    ::http::cleanup $token
+                    if {$retry eq $max_retries} {
+                        error "The APIXU api has timed out. Try again later."
+                    }
+
+                    incr retry
+                    after $backoff
+                    continue
+                }
+
+                break
+            }
+        }
+
+        set response_code [::http::ncode $token]
+        set json [::http::data $token]
+        # Converts the json data to a dict
+        set data [::json::json2dict $json]
+
+        # If data returns back an error, show the message
+        if {[dict exists $data error]} {
+            ::http::cleanup $token
+            putlog [dict get $data error message]
+            error [dict get $data error message]
         }
 
         if {![string length $data]} {
             ::http::cleanup $token
             putlog "returned no data"
-            error "Bot's broked. Tell eck0 to MAEK FEEKS!"
+            putlog "status: $status, code: $response_code"
+            error "Bot's broked. Tell the admin to MAEK FEEKS!"
+        }
+
+        if {$status eq "ok" && $response_code eq 200} {
+            ::http::cleanup $token
+            putlog "status: $status, code: $response_code"
+            return $data
         }
     }
 
-    proc _json_parse {json userinfo type} {
+    proc _json_parse {data userinfo type} {
         # Converts json to a dict and parses it to display weather.
         #
         # Args:
@@ -304,13 +323,6 @@ namespace eval weather {
         # Returns:
         #   (string) - Returns the string of weather to be displayed to user.
         #
-        set data [::json::json2dict $json]
-
-        if {[dict exists $data error]} {
-            putlog [dict get $data error message]
-            error [dict get $data error message]
-        }
-
         set units [dict get $userinfo units]
         set city [dict get $data location name]
         set region [dict get $data location region]
@@ -415,24 +427,6 @@ namespace eval weather {
         putlog "nick: $nick, uhost: $uhost, hand: $hand is trying to set location"
         set units [string index $text 0]
         set location [string range $text 2 end]
-
-        # First regexp matches any location given by user that is not
-        # a-z, A-Z, number, period, comma or space. This is sanitize
-        # the location string given to catch any illegal characters
-        # before the API call that will return an error.
-        #
-        # Second regexp matches any location give by user that starts
-        # and ends with a-z or A-Z with a : in the between the two. This
-        # is to let strings like "iata:ksjc" to be passed through as the
-        # only illegal character if used the correct way.
-        #
-        # If the first regexp is true and second regexp is false, the
-        # conditional will be true and throw an error for illegal characters.
-        if {[regexp {[^\w., ]} $location] && ![regexp {^[a-zA-Z]+:[a-zA-Z]+$} $location]} {
-            putlog "weather::_set_location caught illegal characters"
-            error "Illegal characters in your location query. Acceptable characters:\
-                   a-z, 0-9, commas, and spaces. Colons only used i.e. 'iata:ksjc'"
-        }
 
         if {!($units eq "0" || $units eq "1" || $units eq "2")} {
             putlog "$nick set units to an invalid number."
